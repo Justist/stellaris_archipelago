@@ -16,30 +16,59 @@ regenerate the mod's tech overrides and update the apworld.
 """
 
 import argparse
+import contextlib
 import json
 import logging
 import re
-import sys
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Union
+
+from dataclasses import asdict, fields
+from classes import TechEntry
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("TechScanner")
 
 
 def find_game_dir() -> Optional[Path]:
-    """Find Stellaris game installation."""
-    candidates = [
-        Path("C:/Program Files (x86)/Steam/steamapps/common/Stellaris"),
-        Path("C:/Program Files/Steam/steamapps/common/Stellaris"),
-        Path("D:/SteamLibrary/steamapps/common/Stellaris"),
-        Path("D:/Steam/steamapps/common/Stellaris"),
-        Path("E:/SteamLibrary/steamapps/common/Stellaris"),
-        Path.home() / ".steam" / "steam" / "steamapps" / "common" / "Stellaris",
-    ]
+    """Find Stellaris game installation by searching common Steam paths."""
+    import string
+    import sys
+
+    candidates: List[Path] = [Path.home() / ".steam" / "steam" / "steamapps" / "common" / "Stellaris"]
+
+    # Always check Linux/Mac Steam location first
+    
+    # On Windows, dynamically check all available drives
+    if sys.platform == "win32":
+        # Get all available drive letters
+        available_drives = ["C", "D", "E", "F"]
+        with contextlib.suppress(BaseException):
+            available_drives = [d for d in string.ascii_uppercase if Path(f"{d}:/").exists()]
+            
+        steam_patterns = [
+            "{drive}:/Program Files (x86)/Steam/steamapps/common/Stellaris",
+            "{drive}:/Program Files/Steam/steamapps/common/Stellaris",
+            "{drive}:/SteamLibrary/steamapps/common/Stellaris",
+            "{drive}:/Steam/steamapps/common/Stellaris",
+        ]
+
+        for drive in available_drives:
+            for pattern in steam_patterns:
+                candidates.append(Path(pattern.format(drive=drive)))
+    else:
+        # Fallback paths for non-Windows systems
+        candidates.extend([
+            Path.home() / "Games" / "Stellaris",
+            Path("/opt/Stellaris"),
+            Path("/usr/local/games/Stellaris"),
+        ])
+
+    # Search for Stellaris tech directory in candidates
     for p in candidates:
         if p.exists() and (p / "common" / "technology").exists():
             return p
+
     return None
 
 
@@ -56,7 +85,7 @@ def find_user_dir() -> Path:
 
 def extract_tech_block(content: str, tech_name: str) -> Optional[str]:
     """Extract a full tech definition block using brace counting."""
-    pattern = re.compile(r'^' + re.escape(tech_name) + r'\s*=\s*\{', re.MULTILINE)
+    pattern = re.compile(rf'^{re.escape(tech_name)}' + r'\s*=\s*\{', re.MULTILINE)
     m = pattern.search(content)
     if not m:
         return None
@@ -69,13 +98,33 @@ def extract_tech_block(content: str, tech_name: str) -> Optional[str]:
         elif content[pos] == '}':
             depth -= 1
         pos += 1
+    if depth != 0:
+        logger.warning(f"Unmatched braces in tech block for {tech_name}")
+        return None
     return content[start:pos]
 
 
-def parse_tech_files(game_dir: Path) -> Dict[str, dict]:
+def parse_tech_files(game_dir: Path) -> List[TechEntry]:
     """Parse all technology files and extract metadata."""
     tech_dir = game_dir / "common" / "technology"
-    techs = {}
+
+    # Mapping: tech_key -> TechEntry
+    techs: List[TechEntry] = []
+    
+    DLC_MARKERS = {
+        "ancient_relics": "Ancient Relics",
+        "apocalypse": "Apocalypse",
+        "distant_stars": "Distant Stars",
+        "federations": "Federations",
+        "megacorp": "Megacorp",
+        "nemesis": "Nemesis",
+        "overlord": "Overlord",
+        "toxoids": "Toxoids",
+        "first_contact": "First Contact",
+        "astral": "Astral Planes",
+        "machine_age": "Machine Age",
+        "cosmic_storms": "Cosmic Storms",
+    }
 
     for tech_file in sorted(tech_dir.glob("*.txt")):
         # Skip repeatable techs (infinite, not suitable for randomization)
@@ -89,37 +138,17 @@ def parse_tech_files(game_dir: Path) -> Dict[str, dict]:
             continue
 
         # Determine DLC from filename
-        dlc = None
         fname = tech_file.name.lower()
-        if "ancient_relics" in fname:
-            dlc = "Ancient Relics"
-        elif "apocalypse" in fname:
-            dlc = "Apocalypse"
-        elif "distant_stars" in fname:
-            dlc = "Distant Stars"
-        elif "federations" in fname:
-            dlc = "Federations"
-        elif "megacorp" in fname:
-            dlc = "Megacorp"
-        elif "nemesis" in fname:
-            dlc = "Nemesis"
-        elif "overlord" in fname:
-            dlc = "Overlord"
-        elif "toxoids" in fname:
-            dlc = "Toxoids"
-        elif "first_contact" in fname:
-            dlc = "First Contact"
-        elif "astral" in fname:
-            dlc = "Astral Planes"
-        elif "machine_age" in fname:
-            dlc = "Machine Age"
-        elif "cosmic_storms" in fname:
-            dlc = "Cosmic Storms"
+        dlc: str | None = None
+        for marker, name in DLC_MARKERS.items():
+            if marker in fname:
+                dlc = name
+                break
 
         # Find all tech definitions
         for m in re.finditer(r'^(tech_\w+)\s*=\s*\{', content, re.MULTILINE):
-            tech_key = m.group(1)
-            block = extract_tech_block(content, tech_key)
+            tech_key : str = m[1]
+            block : str | None = extract_tech_block(content, tech_key)
             if not block:
                 continue
 
@@ -130,53 +159,56 @@ def parse_tech_files(game_dir: Path) -> Dict[str, dict]:
             cost_var_m = re.search(r'\bcost\s*=\s*@tier(\d+)cost', block)
 
             if cost_m:
-                cost = int(cost_m.group(1))
+                cost = int(cost_m[1])
             elif cost_var_m:
                 # Approximate cost from tier variable: @tier1cost ≈ 500, etc.
-                tier_ref = int(cost_var_m.group(1))
+                tier_ref = int(cost_var_m[1])
                 cost = max(500, tier_ref * 600)
             else:
                 cost = 0
             cat_m = re.search(r'\bcategory\s*=\s*\{\s*(\w+)', block)
-            prereq_m = re.search(r'prerequisites\s*=\s*\{([^}]*)\}', block)
+            prereq_m = re.search(r'prerequisites\s*=\s*\{([^}]*)}', block)
             start_m = re.search(r'\bstart_tech\s*=\s*yes', block)
             rare_m = re.search(r'\bis_rare\s*=\s*yes', block)
             dangerous_m = re.search(r'\bis_dangerous\s*=\s*yes', block)
 
-            tier = int(tier_m.group(1)) if tier_m else 0
-            area = area_m.group(1) if area_m else "engineering"
-            category = cat_m.group(1) if cat_m else ""
-            prereqs = []
+            tier : int = int(tier_m[1]) if tier_m else 0
+            area : str = area_m[1] if area_m else "engineering"
+            category : str = cat_m[1] if cat_m else ""
+            prerequisites : List[str] = []
             if prereq_m:
-                prereqs = [p.strip().strip('"') for p in prereq_m.group(1).split()
-                           if p.strip().strip('"').startswith("tech_")]
-            is_start = bool(start_m)
-            is_rare = bool(rare_m)
-            is_dangerous = bool(dangerous_m)
+                prerequisites = [
+                    p.strip().strip('"')
+                    for p in prereq_m[1].split()
+                    if p.strip().strip('"').startswith("tech_")
+                ]
+            is_start : bool = bool(start_m)
+            is_rare : bool = bool(rare_m)
+            is_dangerous : bool = bool(dangerous_m)
 
             # Determine a human-readable name from the key
-            display_name = tech_key.replace("tech_", "").replace("_", " ").title()
+            display_name : str = tech_key.replace("tech_", "").replace("_", " ").title()
 
-            techs[tech_key] = {
-                "key": tech_key,
-                "name": display_name,
-                "tier": tier,
-                "area": area,
-                "cost": cost,
-                "category": category,
-                "prerequisites": prereqs,
-                "is_start_tech": is_start,
-                "is_rare": is_rare,
-                "is_dangerous": is_dangerous,
-                "dlc": dlc,
-                "source_file": tech_file.name,
-                "randomize": False,  # default: not randomized
-            }
+            techs.append(TechEntry(
+                key=tech_key,
+                name=display_name,
+                tier=tier,
+                area=area,
+                cost=cost,
+                category=category,
+                prerequisites=prerequisites,
+                is_start_tech=is_start,
+                is_rare=is_rare,
+                is_dangerous=is_dangerous,
+                dlc=dlc,
+                source_file=tech_file.name,
+                randomize=False,
+            ))
 
     return techs
 
 
-def auto_select_defaults(techs: Dict[str, dict]) -> Dict[str, dict]:
+def auto_select_defaults(techs: List[TechEntry]) -> List[TechEntry]:
     """Auto-select a sensible default set of techs to randomize.
     
     Conservative by default — selects ~60-80 landmark techs that have
@@ -216,65 +248,70 @@ def auto_select_defaults(techs: Dict[str, dict]) -> Dict[str, dict]:
         "industry", "materials", "propulsion", "voidcraft",
     ]
 
-    for key, tech in techs.items():
-        if tech["is_start_tech"]:
+    for tech in techs:
+        if tech.is_start_tech:
             continue
-        if tech["tier"] < 1 or tech["tier"] > 4:
+        if tech.tier < 1 or tech.tier > 4:
             continue
-        if any(pat in key for pat in skip_patterns):
+        if any(pat in tech.key for pat in skip_patterns):
             continue
         # Only select techs in good categories
-        if tech.get("category") not in good_categories:
+        if tech.category not in good_categories:
             continue
         # Default: tier 1-3 base game techs
-        if tech["tier"] <= 3 and not tech.get("dlc"):
-            tech["randomize"] = True
+        if tech.tier <= 3 and not tech.dlc:
+            tech.randomize = True
 
     return techs
 
 
-def save_config(techs: Dict[str, dict], config_path: Path):
+def save_config(techs: List[TechEntry], config_path: Path):
     """Save tech config to JSON."""
     # Sort by area, then tier, then name for readability
-    sorted_techs = dict(sorted(
-        techs.items(),
-        key=lambda x: (x[1]["area"], x[1]["tier"], x[1]["key"])
-    ))
+    sorted_techs = sorted(
+        techs,
+        key=lambda x: (x.area, x.tier, x.key)
+    )
+    randomized_count = sum(bool(t.randomize) for t in sorted_techs)
+    by_area = {
+        area: sum(bool(t.area == area and t.randomize) for t in sorted_techs)
+        for area in ["physics", "society", "engineering"]
+    }
 
     config = {
         "_help": "Set 'randomize' to true/false for each tech. "
                  "Randomized techs will be replaced by AP techs in-game.",
         "_stats": {
             "total_techs": len(sorted_techs),
-            "randomized": sum(1 for t in sorted_techs.values() if t["randomize"]),
-            "by_area": {
-                area: sum(1 for t in sorted_techs.values()
-                          if t["area"] == area and t["randomize"])
-                for area in ["physics", "society", "engineering"]
-            }
+            "randomized": randomized_count,
+            "by_area": by_area,
         },
-        "techs": sorted_techs,
+        "techs": [asdict(t) for t in sorted_techs], # convert to dict for JSON serialization
     }
 
     config_path.write_text(json.dumps(config, indent=2), encoding="utf-8")
     logger.info(f"Saved config to {config_path}")
     logger.info(f"  Total techs: {len(sorted_techs)}")
-    logger.info(f"  Randomized: {config['_stats']['randomized']}")
+    logger.info(f"  Randomized: {randomized_count}")
     for area in ["physics", "society", "engineering"]:
-        count = config["_stats"]["by_area"][area]
+        count = by_area[area]
         logger.info(f"  {area}: {count} randomized")
 
 
-def load_config(config_path: Path) -> Dict[str, dict]:
+def load_config(config_path: Path) -> List[TechEntry]:
     """Load tech config from JSON."""
     data = json.loads(config_path.read_text(encoding="utf-8"))
-    return data.get("techs", {})
+    known = {f.name for f in fields(TechEntry)}
+    return [
+        TechEntry(**{k: v for k, v in item.items() if k in known})
+        for item in data.get("techs", [])
+    ]
 
 
-def generate_overrides(techs: Dict[str, dict], game_dir: Path, mod_dir: Path):
+def generate_overrides(techs: List[TechEntry], game_dir: Path, mod_dir: Path):
     """Generate FIOS tech override file from config."""
     tech_dir = game_dir / "common" / "technology"
-    randomized = {k: v for k, v in techs.items() if v.get("randomize")}
+    randomized = [t for t in techs if t.randomize]
 
     if not randomized:
         logger.warning("No techs selected for randomization!")
@@ -285,10 +322,8 @@ def generate_overrides(techs: Dict[str, dict], game_dir: Path, mod_dir: Path):
     for tech_file in sorted(tech_dir.glob("*.txt")):
         if "repeatable" in tech_file.name:
             continue
-        try:
+        with contextlib.suppress(BaseException):
             all_content += tech_file.read_text(encoding="utf-8-sig", errors="replace") + "\n"
-        except Exception:
-            pass
 
     output_lines = [
         "# ==========================================================================",
@@ -301,16 +336,16 @@ def generate_overrides(techs: Dict[str, dict], game_dir: Path, mod_dir: Path):
     ]
 
     blocked = []
-    for tech_key, tech in sorted(randomized.items()):
+    for tech in sorted(randomized, key=lambda t: t.key):
+        tech_key = tech.key
         block = extract_tech_block(all_content, tech_key)
         if not block:
             logger.warning(f"Could not find definition for {tech_key}")
             continue
 
         # Inject blocking flag into potential
-        pot_match = re.search(r'(\t*)potential\s*=\s*\{', block)
-        if pot_match:
-            indent = pot_match.group(1)
+        if pot_match := re.search(r'(\t*)potential\s*=\s*\{', block):
+            indent = pot_match[1]
             insert_pos = pot_match.end()
             injection = f"\n{indent}\tNOT = {{ has_country_flag = ap_tech_blocked_{tech_key} }}"
             block = block[:insert_pos] + injection + block[insert_pos:]
@@ -323,8 +358,7 @@ def generate_overrides(techs: Dict[str, dict], game_dir: Path, mod_dir: Path):
             )
             block = block[:first_brace+1] + injection + block[first_brace+1:]
 
-        output_lines.append(block)
-        output_lines.append("")
+        output_lines.extend((block, ""))
         blocked.append(tech_key)
 
     # Write override file
@@ -337,26 +371,21 @@ def generate_overrides(techs: Dict[str, dict], game_dir: Path, mod_dir: Path):
     return blocked
 
 
-def generate_vanilla_tech_data(techs: Dict[str, dict]) -> str:
+def generate_vanilla_tech_data(techs: List[TechEntry]) -> str:
     """Generate VANILLA_TECH_DATA dict for slot_generator.py."""
-    randomized = {k: v for k, v in techs.items() if v.get("randomize")}
+    randomized = [t for t in techs if t.randomize]
 
     lines = ["VANILLA_TECH_DATA = {"]
-    for key, tech in sorted(randomized.items()):
-        prereqs_str = str(tech.get("prerequisites", []))
+    for tech in sorted(randomized, key=lambda t: t.key):
+        prerequisites_str = str(tech.prerequisites)
         lines.append(
-            f'    "{key}": {{"tier": {tech["tier"]}, '
-            f'"area": "{tech["area"]}", '
-            f'"prereqs": {prereqs_str}}},'
+            f'    "{tech.key}": {{"tier": {tech.tier}, "area": "{tech.area}", "prerequisites": {prerequisites_str}}},'
         )
-    lines.append("}")
-
-    lines.append("")
-    lines.append("LOCATION_TO_VANILLA_TECH = {")
-    for key, tech in sorted(randomized.items()):
-        display = tech.get("name", key.replace("tech_", "").replace("_", " ").title())
+    lines.extend(("}", "", "LOCATION_TO_VANILLA_TECH = {"))
+    for tech in sorted(randomized, key=lambda t: t.key):
+        display = tech.name
         loc_name = f"Research {display}"
-        lines.append(f'    "{loc_name}": "{key}",')
+        lines.append(f'    "{loc_name}": "{tech.key}",')
     lines.append("}")
 
     return "\n".join(lines)
@@ -386,18 +415,17 @@ def cmd_scan(game_dir: Optional[Path] = None):
 
     print(f"\nConfig saved to: {config_path}")
     print(f"\nEdit the file to set 'randomize' to true/false for each tech.")
-    print(f"Then run: python tech_scanner.py apply")
+    print("Then run: python tech_scanner.py apply")
 
     # Summary by area and tier
-    randomized = [t for t in techs.values() if t["randomize"]]
+    randomized = [t for t in techs if t.randomize]
     print(f"\nDefault selection: {len(randomized)} techs randomized out of {len(techs)}")
     for area in ["physics", "society", "engineering"]:
-        area_techs = [t for t in randomized if t["area"] == area]
+        area_techs = [t for t in randomized if t.area == area]
         print(f"  {area}: {len(area_techs)}")
         for tier in range(1, 6):
-            tier_techs = [t for t in area_techs if t["tier"] == tier]
-            if tier_techs:
-                print(f"    Tier {tier}: {', '.join(t['name'] for t in tier_techs[:5])}"
+            if tier_techs := [t for t in area_techs if t.tier == tier]:
+                print(f"    Tier {tier}: {', '.join(t.name for t in tier_techs[:5])}"
                       + (f" +{len(tier_techs)-5} more" if len(tier_techs) > 5 else ""))
 
 
@@ -409,20 +437,18 @@ def cmd_show():
         return
 
     techs = load_config(config_path)
-    randomized = {k: v for k, v in techs.items() if v.get("randomize")}
+    randomized = [t for t in techs if t.randomize]
 
     print(f"Randomized techs: {len(randomized)} / {len(techs)}\n")
     for area in ["physics", "society", "engineering"]:
-        area_techs = sorted(
-            [(k, v) for k, v in randomized.items() if v["area"] == area],
-            key=lambda x: x[1]["tier"]
-        )
-        if area_techs:
+        if area_techs := sorted(
+            [t for t in randomized if t.area == area], key=lambda x: x.tier
+        ):
             print(f"  {area.upper()} ({len(area_techs)}):")
-            for key, tech in area_techs:
-                dlc = f" [{tech['dlc']}]" if tech.get("dlc") else ""
-                prereq = f" (requires: {', '.join(tech['prerequisites'])})" if tech.get("prerequisites") else ""
-                print(f"    T{tech['tier']} {tech['name']}{dlc}{prereq}")
+            for tech in area_techs:
+                dlc = f" [{tech.dlc}]" if tech.dlc else ""
+                prereq = f" (requires: {', '.join(tech.prerequisites)})" if tech.prerequisites else ""
+                print(f"    T{tech.tier} {tech.name}{dlc}{prereq}")
             print()
 
 
@@ -451,12 +477,11 @@ def cmd_apply(game_dir: Optional[Path] = None):
     data_path = user_dir / "ap_tech_data.py"
     data_path.write_text(data_str, encoding="utf-8")
     logger.info(f"Saved slot_generator data to {data_path}")
-
-    randomized = {k: v for k, v in techs.items() if v.get("randomize")}
+    randomized = [t for t in techs if t.randomize]
     print(f"\nApplied: {len(blocked)} tech overrides generated")
     print(f"Location data: {len(randomized)} techs ready for AP world")
     print(f"\nThe mod's tech overrides have been updated.")
-    print(f"Restart Stellaris for changes to take effect.")
+    print("Restart Stellaris for changes to take effect.")
 
 
 def main():

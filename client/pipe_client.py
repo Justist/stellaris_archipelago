@@ -116,9 +116,8 @@ class PipeClient:
 
     def send_command(self, command: str) -> Optional[str]:
         """Send a command and return the response. Returns None on failure."""
-        if not self.connected:
-            if not self.connect():
-                return None
+        if not self.connected and not self.connect():
+            return None
 
         try:
             # Send

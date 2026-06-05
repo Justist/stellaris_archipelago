@@ -43,7 +43,7 @@ def find_stellaris_user_dir() -> Path:
     sys.exit(1)
 
 
-def find_stellaris_game_dir() -> Path:
+def find_stellaris_game_dir() -> Path | None:
     """Try common Steam install locations."""
     candidates = [
         Path("C:/Program Files (x86)/Steam/steamapps/common/Stellaris"),
@@ -163,7 +163,7 @@ def cmd_configure(game_dir=None):
     if not config_path.exists():
         print("No config found. Scanning game files first...")
         sys.path.insert(0, str(CLIENT_DIR))
-        from tech_scanner import cmd_scan
+        from client.tech_scanner import cmd_scan
         cmd_scan(game_dir)
 
     if config_path.exists():
@@ -183,7 +183,7 @@ def cmd_configure(game_dir=None):
 def cmd_apply_config(game_dir=None):
     """Apply tech config to regenerate mod overrides."""
     sys.path.insert(0, str(CLIENT_DIR))
-    from tech_scanner import cmd_apply
+    from client.tech_scanner import cmd_apply
     cmd_apply(game_dir)
 
 
@@ -211,7 +211,7 @@ def cmd_test():
         print("Pipe test requires Windows"); return
 
     sys.path.insert(0, str(CLIENT_DIR))
-    from pipe_client import create_pipe_client
+    from client.pipe_client import create_pipe_client
 
     p = create_pipe_client()
     if not p.connect():
@@ -240,7 +240,7 @@ def cmd_mock():
 
     # Generate test AP techs
     print("\nGenerating test AP techs for mock session...")
-    from slot_generator import generate_mod_files
+    from client.slot_generator import generate_mod_files
     stellaris = find_stellaris_user_dir()
     mod_dir = stellaris / "mod" / "archipelago_multiworld"
 
@@ -439,29 +439,24 @@ Commands:
     parser.add_argument("--password", default="", help="Room password")
     parser.add_argument("--game-dir", type=Path, default=None, help="Stellaris game directory (for tech scanning)")
     args = parser.parse_args()
-
-    if args.command == "install":
-        cmd_install()
-    elif args.command == "build-dll":
-        cmd_build_dll()
-    elif args.command == "install-dll":
-        cmd_install_dll()
-    elif args.command == "configure":
-        cmd_configure(args.game_dir)
-    elif args.command == "apply-config":
-        cmd_apply_config(args.game_dir)
-    elif args.command == "check-errors":
-        cmd_check_errors()
-    elif args.command == "test":
-        cmd_test()
-    elif args.command == "mock":
-        cmd_mock()
-    elif args.command == "play":
-        cmd_play(args.server, args.slot, args.password)
-    elif args.command == "status":
-        cmd_status()
-    elif args.command == "uninstall":
-        cmd_uninstall()
+    
+    commands = {
+        "install": cmd_install,
+        "build-dll": cmd_build_dll,
+        "install-dll": cmd_install_dll,
+        "configure": lambda: cmd_configure(args.game_dir),
+        "apply-config": lambda: cmd_apply_config(args.game_dir),
+        "check-errors": cmd_check_errors,
+        "test": cmd_test,
+        "mock": cmd_mock,
+        "play": lambda: cmd_play(args.server, args.slot, args.password),
+        "status": cmd_status,
+        "uninstall": cmd_uninstall,
+    }
+    
+    handler = commands.get(args.command)
+    if handler:
+        handler()
 
 
 if __name__ == "__main__":

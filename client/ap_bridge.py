@@ -192,8 +192,6 @@ class WSConnection:
         # failure and connection failure are handled separately so a
         # failed connect() returns False instead of raising — otherwise
         # the bridge crashes through main() instead of retrying.
-        create = None
-        lib = None
         try:
             import websocket
             lib = "websocket-client"
@@ -577,8 +575,8 @@ class StellarisAPBridge:
         from slot_generator import generate_mod_files, clear_dynamic_files
         clear_dynamic_files(self.mod_dir)
 
-        tech_count = sum(1 for s in slot_data if s["location_type"] == "tech")
-        milestone_count = sum(1 for s in slot_data if s["location_type"] == "milestone")
+        tech_count = sum(bool(s["location_type"] == "tech") for s in slot_data)
+        milestone_count = sum(bool(s["location_type"] == "milestone") for s in slot_data)
 
         blocked_techs = generate_mod_files(slot_data, self.mod_dir)
         if blocked_techs is not None:

@@ -304,24 +304,27 @@ class MockServer:
 async def console_loop(server: MockServer):
     """Interactive console for sending items."""
     await asyncio.sleep(1)  # Let server start first
-
-    print("\n" + "=" * 60)
-    print("MOCK ARCHIPELAGO SERVER — Interactive Console")
-    print("=" * 60)
-    print("\nCommands:")
-    print("  ship    — Send Progressive Ship Class")
-    print("  weapons — Send Progressive Weapons")
-    print("  defense — Send Progressive Defenses")
-    print("  ftl     — Send Progressive FTL")
-    print("  starbase— Send Progressive Starbase")
-    print("  cache   — Send Resource Cache (Small)")
-    print("  research— Send Research Boost")
-    print("  trap    — Send Pirate Surge (trap)")
-    print("  diplo   — Send Diplomatic Incident (trap)")
-    print("  <id>    — Send item by numeric ID")
-    print("  status  — Show server status")
-    print("  quit    — Stop server")
-    print()
+    
+    print("\n".join([
+        "",
+        "=" * 60,
+        "MOCK ARCHIPELAGO SERVER - Interactive Console",
+        "=" * 60,
+        "",
+        "  ship     - Send Progressive Ship Class",
+        "  weapons  - Send Progressive Weapons",
+        "  defense  - Send Progressive Defenses",
+        "  ftl      - Send Progressive FTL",
+        "  starbase - Send Progressive Starbase",
+        "  cache    - Send Resource Cache Small",
+        "  research - Send Research Boost",
+        "  trap     - Send Pirate Surge (trap)",
+        "  diplo    - Send Diplomatic Incident (trap)",
+        "  <id>     - Send item by numeric ID",
+        "  status   - Show server status",
+        "  quit     - Stop server",
+        ""
+    ]))
 
     shortcuts = {
         "ship": 7_471_000,
@@ -350,10 +353,12 @@ async def console_loop(server: MockServer):
             break
         if line == "status":
             connected = "Yes" if server.client_ws else "No"
-            print(f"  Client connected: {connected}")
-            print(f"  Items sent: {server.item_index}")
-            print(f"  Checks received: {len(server.checked_locations)}")
-            print(f"  EnergyLink pool: {server.energy_link_pool} EC")
+            print("\n".join([
+                f"\tClient connected: {connected}",
+                f"\tItems sent: {server.item_index}",
+                f"\tChecks received: {len(server.checked_locations)}",
+                f"\tEnergyLink pool: {server.energy_link_pool} EC",
+            ]))
             for loc_id in sorted(server.checked_locations):
                 name = LOCATIONS.get(loc_id, f"Unknown ({loc_id})")
                 print(f"    ✓ {name}")

@@ -18,7 +18,7 @@ class TechCatalogEntry(NamedTuple):
     display: str        # Human-readable name (e.g. "Synthetics")
     tier: int           # Stellaris tech tier (0-5)
     area: str           # "physics" | "society" | "engineering"
-    prereqs: List[str]  # Vanilla tech prerequisites
+    prerequisites: List[str]  # Vanilla tech prerequisites
     dlc: Optional[str]  # DLC short flag, or None for base game
     offset: int         # Stable ID offset — NEVER change after release
     category: str       # Stellaris tech category (e.g. "biology")
