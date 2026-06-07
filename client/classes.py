@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
-VALID_AREAS = {"physics", "society", "engineering",}
+VALID_AREAS : Tuple[str, ...] = ("physics", "society", "engineering")
 
 # Not frozen: we need TechEntry to be mutable for randomization, and unfrozen cannot inherit from frozen.
 @dataclass(order=True, slots=True)
