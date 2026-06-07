@@ -16,9 +16,9 @@ def has(state: CollectionState, player: int, item: str, count: int = 1) -> bool:
 
 def find_entrance(region: Region, name: str):
     """Find an entrance by name from a region's exits list."""
-    for exit in region.exits:
-        if exit.name == name:
-            return exit
+    for region_exit in region.exits:
+        if region_exit.name == name:
+            return region_exit
     raise KeyError(f"Entrance '{name}' not found in region '{region.name}'")
 
 

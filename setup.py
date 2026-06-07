@@ -103,7 +103,7 @@ def cmd_install():
     print(f"Launch Stellaris with: -logall")
 
 
-def cmd_build_dll():
+def cmd_build_dll(generator: str | None = None):
     """Build the DLL with CMake + MSVC."""
     if sys.platform != "win32":
         print("DLL build requires Windows + MSVC"); return
@@ -112,13 +112,28 @@ def cmd_build_dll():
     build_dir.mkdir(exist_ok=True)
 
     print("Configuring with CMake...")
-    r = subprocess.run(
-        ["cmake", "..", "-G", "Visual Studio 17 2022", "-A", "x64"],
-        cwd=build_dir, capture_output=True, text=True
-    )
-    if r.returncode != 0:
-        print(f"CMake configure failed:\n{r.stderr}")
-        return
+    
+    gen_candidates = [generator] if generator else [
+        "Visual Studio 18 2026",
+        "Visual Studio 17 2022",
+        "Ninja",
+    ]
+    
+    for gen in gen_candidates:
+        if not gen:
+            continue
+        
+        gen_command = ["cmake", "..", "-G", gen]
+        if "Visual Studio" in gen:
+            gen_command += ["-A", "x64"]
+        else:
+            gen_command += ["-DCMAKE_BUILD_TYPE=Release"]
+            
+        result = subprocess.run(gen_command, cwd=build_dir, capture_output=True, text=True)
+        if result.returncode == 0:
+            print(f"\tCMake configured successfully with generator: {gen}")
+            break
+        print(f"\tCMake configure failed with generator '{gen}':\n{result.stderr}")
 
     print("Building...")
     r = subprocess.run(
