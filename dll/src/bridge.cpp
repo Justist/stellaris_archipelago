@@ -19,18 +19,32 @@ static void send_response(HANDLE pipe, const std::string& response) {
     WriteFile(pipe, msg.c_str(), (DWORD)msg.size(), &written, nullptr);
 }
 
+static bool starts_with(const std::string& s, const char* prefix) {
+    return s.rfind(prefix, 0) == 0;
+}
+
+static bool _close_handle(HANDLE& handle) {
+    if (handle != INVALID_HANDLE_VALUE) {
+        DisconnectNamedPipe(g_pipe);
+        CloseHandle(handle);
+        handle = INVALID_HANDLE_VALUE;
+        return true;
+    }
+    return false;
+}
+
 static void handle_message(HANDLE pipe, const std::string& message) {
     if (message.empty()) return;
-    if (message.rfind("EFFECT ", 0) == 0) {
+    if (message.starts_with("EFFECT ")) {
         console_queue_command("effect " + message.substr(7));
         send_response(pipe, "OK");
-    } else if (message.rfind("EVENT ", 0) == 0) {
+    } else if (message.starts_with("EVENT ")) {
         console_queue_command("event " + message.substr(6));
         send_response(pipe, "OK");
-    } else if (message.rfind("RAW ", 0) == 0) {
+    } else if (message.starts_with("RAW ")) {
         console_queue_command(message.substr(4));
         send_response(pipe, "OK");
-    } else if (message.rfind("BATCH ", 0) == 0) {
+    } else if (message.starts_with("BATCH ")) {
         std::istringstream stream(message.substr(6));
         std::string cmd; int count = 0;
         while (std::getline(stream, cmd, '|')) { if (!cmd.empty()) { console_queue_command(cmd); count++; } }
@@ -67,7 +81,8 @@ static void server_loop() {
         if (!connected && GetLastError() != ERROR_PIPE_CONNECTED) {
             if (!g_running) break;
             ap_log("Bridge: ConnectNamedPipe failed (%d)", GetLastError());
-            CloseHandle(g_pipe); g_pipe = INVALID_HANDLE_VALUE; continue;
+            _close_handle(g_pipe);
+            continue;
         }
         ap_log("Bridge: client connected!");
         char buffer[PIPE_BUFFER_SIZE]; std::string partial;
@@ -89,7 +104,7 @@ static void server_loop() {
                 if (!line.empty()) handle_message(g_pipe, line);
             }
         }
-        DisconnectNamedPipe(g_pipe); CloseHandle(g_pipe); g_pipe = INVALID_HANDLE_VALUE;
+        _close_handle(g_pipe);
         // Drain any leftover queued commands. Same threading concern as
         // the FLUSH handler above — must marshal to the game thread.
         // If the game window is gone (game shutting down), this returns
@@ -105,9 +120,9 @@ bool bridge_start() { if (g_running) return true; g_running = true; g_serverThre
 void bridge_stop() {
     g_running = false;
     HANDLE dummy = CreateFileA(PIPE_NAME, GENERIC_READ|GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, 0, nullptr);
-    if (dummy != INVALID_HANDLE_VALUE) CloseHandle(dummy);
+    _close_handle(dummy);
     if (g_serverThread.joinable()) g_serverThread.join();
-    if (g_pipe != INVALID_HANDLE_VALUE) { CloseHandle(g_pipe); g_pipe = INVALID_HANDLE_VALUE; }
+    _close_handle(g_pipe);
     ap_log("Bridge: stopped");
 }
 int bridge_tick() { return console_process_queue(); }
