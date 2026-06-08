@@ -20,6 +20,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import List, Tuple
 
 SCRIPT_DIR = Path(__file__).parent.resolve()
 PROJECT_DIR = SCRIPT_DIR  # setup.py is at root
@@ -73,34 +74,34 @@ def cmd_install():
         shutil.rmtree(mod_dir)
     shutil.copytree(MOD_SRC / "archipelago_multiworld", mod_dir)
 
-    file_count = sum(1 for _ in mod_dir.rglob("*") if _.is_file())
+    file_count = sum(bool(_.is_file()) for _ in mod_dir.rglob("*"))
     print(f"  Copied {file_count} mod files")
 
     # Check DLL
     game_dir = find_stellaris_game_dir()
     if game_dir and (game_dir / "version.dll").exists():
-        print(f"  DLL: found at {game_dir / 'version.dll'}")
+        print(f"\tDLL: found at {game_dir / 'version.dll'}")
     elif game_dir:
-        print(f"  DLL: NOT found at {game_dir}")
-        print(f"       Run: python setup.py build-dll && python setup.py install-dll")
+        print(f"\tDLL: NOT found at {game_dir}")
+        print("\t\t\tRun: python setup.py build-dll && python setup.py install-dll")
     else:
-        print(f"  DLL: Stellaris game directory not found automatically")
-        print(f"       Copy dll/build/Release/version.dll to the Stellaris game folder")
+        print("\tDLL: Stellaris game directory not found automatically")
+        print("\t\t\tCopy dll/build/Release/version.dll to the Stellaris game folder")
 
     # Check Python deps
     try:
         import websocket
-        print(f"  websocket-client: installed")
+        print("\twebsocket-client: installed")
     except ImportError:
         try:
             import websockets
-            print(f"  websockets: installed (sync mode)")
+            print("\twebsockets: installed (sync mode)")
         except ImportError:
-            print(f"  WebSocket library: NOT installed")
-            print(f"       Run: pip install websocket-client")
+            print("\tWebSocket library: NOT installed")
+            print("\t\t\tRun: pip install websocket-client")
 
-    print(f"\nDone! Enable 'Archipelago Multiworld' in the Stellaris launcher.")
-    print(f"Launch Stellaris with: -logall")
+    print("\nDone! Enable 'Archipelago Multiworld' in the Stellaris launcher.")
+    print("Launch Stellaris with: -logall")
 
 
 def cmd_build_dll(generator: str | None = None):
@@ -146,10 +147,10 @@ def cmd_build_dll(generator: str | None = None):
 
     dll_path = build_dir / "Release" / "version.dll"
     if dll_path.exists():
-        print(f"  Built: {dll_path} ({dll_path.stat().st_size} bytes)")
-        print(f"  Run: python setup.py install-dll")
+        print(f"\tBuilt: {dll_path} ({dll_path.stat().st_size} bytes)")
+        print("\tRun: python setup.py install-dll")
     else:
-        print(f"  Build output not found at {dll_path}")
+        print(f"\tBuild output not found at {dll_path}")
 
 
 def cmd_install_dll():
@@ -157,7 +158,7 @@ def cmd_install_dll():
     dll_path = DLL_DIR / "build" / "Release" / "version.dll"
     if not dll_path.exists():
         print(f"DLL not found at {dll_path}")
-        print(f"Run: python setup.py build-dll"); return
+        print("Run: python setup.py build-dll"); return
 
     game_dir = find_stellaris_game_dir()
     if not game_dir:
@@ -188,9 +189,9 @@ def cmd_configure(game_dir=None):
         return
 
     # Step 2: launch dashboard
-    print(f"\nLaunching dashboard for tech configuration...")
-    print(f"  Go to the 'Tech Config' tab to toggle techs on/off")
-    print(f"  Then click 'Apply & Save' to generate mod overrides")
+    print("\nLaunching dashboard for tech configuration...")
+    print("\tGo to the 'Tech Config' tab to toggle techs on/off")
+    print("\tThen click 'Apply & Save' to generate mod overrides")
     import subprocess
     subprocess.Popen([sys.executable, str(PROJECT_DIR / "dashboard.py")])
 
@@ -215,7 +216,7 @@ def cmd_check_errors():
     if errors:
         print(f"Found {len(errors)} AP-related error(s):\n")
         for err in errors:
-            print(f"  {err}")
+            print(f"\t{err}")
     else:
         print("No AP-related errors found in error.log!")
 
@@ -286,12 +287,12 @@ def cmd_mock():
     print(f"\n{'='*60}")
     print("READY TO TEST")
     print(f"{'='*60}")
-    print(f"\n1. Start Stellaris with -logall, enable the mod, start a game")
-    print(f"2. In another terminal, run:")
-    print(f"   cd client && python mock_ap_server.py")
-    print(f"3. In another terminal, run:")
-    print(f"   cd client && python ap_bridge.py --server localhost:38281 --slot Stellaris")
-    print(f"4. In the mock server, type: ship / cache / trap")
+    print("\n1. Start Stellaris with -logall, enable the mod, start a game")
+    print("2. In another terminal, run:")
+    print("\tcd client && python mock_ap_server.py")
+    print("3. In another terminal, run:")
+    print("\tcd client && python ap_bridge.py --server localhost:38281 --slot Stellaris")
+    print("4. In the mock server, type: ship / cache / trap")
 
 
 def cmd_play(server: str, slot: str, password: str = ""):
@@ -302,8 +303,8 @@ def cmd_play(server: str, slot: str, password: str = ""):
     cmd_install()
 
     print(f"\nConnecting to {server} as '{slot}'...")
-    print(f"The bridge will auto-generate AP techs on connect.")
-    print(f"After it says 'DYNAMIC TECHS GENERATED', restart Stellaris.\n")
+    print("The bridge will auto-generate AP techs on connect.")
+    print("After it says 'DYNAMIC TECHS GENERATED', restart Stellaris.\n")
 
     # Run the bridge
     os.chdir(CLIENT_DIR)
@@ -352,25 +353,31 @@ def cmd_uninstall():
     print("\nUninstall complete.")
 
 
-def cmd_status():
+def cmd_status() -> List[Tuple[str, str]]:
     """Show what's installed and working."""
-    print("=== Stellaris AP Status ===\n")
+    printed_rows = []
+    print("\t=== Stellaris AP Status ===\n")
 
     # User dir
     try:
         stellaris = find_stellaris_user_dir()
-        print(f"  User dir:  {stellaris}")
+        # print(f"  User dir:  {stellaris}")
+        printed_rows.append(("User dir", str(stellaris)))
     except SystemExit:
-        print(f"  User dir:  NOT FOUND"); return
-
+        # print("\tUser dir:\tNOT FOUND"); return
+        printed_rows.append(("User dir", "NOT FOUND"))
+        return printed_rows
+        
     # Mod installed?
     mod_dir = stellaris / "mod" / "archipelago_multiworld"
     mod_file = stellaris / "mod" / "archipelago_multiworld.mod"
     if mod_dir.exists() and mod_file.exists():
-        file_count = sum(1 for _ in mod_dir.rglob("*") if _.is_file())
-        print(f"  Mod:       installed ({file_count} files)")
+        file_count = sum(bool(_.is_file()) for _ in mod_dir.rglob("*"))
+        # print(f"\tMod:\t\t\tinstalled ({file_count} files)")
+        printed_rows.append(("Mod", f"installed ({file_count} files)"))
     else:
-        print(f"  Mod:       NOT installed")
+        # print("\tMod:\t\t\tNOT installed")
+        printed_rows.append(("Mod", "NOT installed"))
 
     # Dynamic techs?
     dyn = mod_dir / "common" / "technology" / "ap_dynamic_techs.txt"
@@ -378,54 +385,72 @@ def cmd_status():
         import re
         with open(dyn) as f:
             count = len(re.findall(r'^ap_slot_\d+', f.read(), re.MULTILINE))
-        print(f"  AP techs:  {count} generated")
+        # print(f"\tAP techs:\t\t{count} generated")
+        printed_rows.append(("AP techs", f"{count} generated"))
     else:
-        print(f"  AP techs:  none (connect to AP server to generate)")
+        # print("\tAP techs:\t\tnone (connect to AP server to generate)")
+        printed_rows.append(("AP techs", "none (connect to AP server to generate)"))
 
-    # DLL?
-    game_dir = find_stellaris_game_dir()
-    if game_dir:
-        print(f"  Game dir:  {game_dir}")
+    if game_dir := find_stellaris_game_dir():
+        # print(f"\tGame dir:\t\t{game_dir}")
+        printed_rows.append(("Game dir", str(game_dir)))
         dll = game_dir / "version.dll"
         if dll.exists():
-            print(f"  DLL:       installed ({dll.stat().st_size} bytes)")
+            # print(f"\tDLL:\t\t\tinstalled ({dll.stat().st_size} bytes)")
+            printed_rows.append(("DLL", f"installed ({dll.stat().st_size} bytes)"))
         else:
-            print(f"  DLL:       NOT installed")
+            # print("\tDLL:\t\t\tNOT installed")
+            printed_rows.append(("DLL", "NOT installed"))
     else:
-        print(f"  Game dir:  not found automatically")
+        # print("\tGame dir:\t\tnot found automatically")
+        printed_rows.append(("Game dir", "not found automatically"))
 
     # DLL built?
     built_dll = DLL_DIR / "build" / "Release" / "version.dll"
     if built_dll.exists():
-        print(f"  DLL build: {built_dll}")
+        # print(f"\tDLL build:\t\t{built_dll}")
+        printed_rows.append(("DLL build", f"{built_dll}"))
     else:
-        print(f"  DLL build: not built yet")
+        # print("\tDLL build:\t\tnot built yet")
+        printed_rows.append(("DLL build", "not built yet"))
 
     # Python deps
     deps = {"websocket-client": "websocket", "websockets": "websockets", "pywin32": "win32api"}
     for name, mod in deps.items():
         try:
             __import__(mod)
-            print(f"  {name}: installed")
+            # print(f"\t{name}:\t\tinstalled")
+            printed_rows.append((name, "installed"))
         except ImportError:
-            print(f"  {name}: NOT installed")
+            # print(f"\t{name}:\t\tNOT installed")
+            printed_rows.append((name, "NOT installed"))
 
     # State file
     state = stellaris / "ap_bridge_state.json"
     if state.exists():
         import json
         data = json.loads(state.read_text())
-        print(f"  AP state:  {len(data.get('sent_checks', []))} checks, {len(data.get('processed_indices', []))} items")
+        # print(f"\tAP state:\t\t{len(data.get('sent_checks', []))} checks,"
+        #       f" {len(data.get('processed_indices', []))} items")
+        printed_rows.append(("AP state", f"{len(data.get('sent_checks', []))} checks, {len(data.get('processed_indices', []))} items"))
     else:
-        print(f"  AP state:  no saved state")
+        # print("\tAP state:\t\tno saved state")
+        printed_rows.append(("AP state", "no saved state"))
 
     # Error log
     error_log = stellaris / "logs" / "error.log"
     if error_log.exists():
         with open(error_log, "r", encoding="utf-8", errors="replace") as f:
-            ap_errors = sum(1 for l in f if "ap_" in l.lower() or "archipelago" in l.lower())
-        print(f"  Errors:    {ap_errors} AP-related in error.log")
+            ap_errors = sum("ap_" in l.lower() or "archipelago" in l.lower() for l in f)
+        # print(f"\tErrors:\t\t\t{ap_errors} AP-related in error.log")
+        printed_rows.append(("Errors in error.log", f"{ap_errors} AP-related"))
+        
+    return printed_rows
 
+def print_rows(rows: List[Tuple[str, str]]):
+    max_key_len = max(len(k) for k, _ in rows)
+    for k, v in rows:
+        print(f"\t{k.ljust(max_key_len)} : {v}")
 
 def main():
     parser = argparse.ArgumentParser(
@@ -444,7 +469,7 @@ Commands:
   play            Connect to a real AP server
   status          Show installation status
   uninstall       Remove all installed files
-        """
+"""
     )
     parser.add_argument("command",
         choices=["install", "build-dll", "install-dll", "configure", "apply-config",
@@ -454,7 +479,7 @@ Commands:
     parser.add_argument("--password", default="", help="Room password")
     parser.add_argument("--game-dir", type=Path, default=None, help="Stellaris game directory (for tech scanning)")
     args = parser.parse_args()
-    
+
     commands = {
         "install": cmd_install,
         "build-dll": cmd_build_dll,
@@ -468,10 +493,10 @@ Commands:
         "status": cmd_status,
         "uninstall": cmd_uninstall,
     }
-    
-    handler = commands.get(args.command)
-    if handler:
-        handler()
+
+    if handler := commands.get(args.command):
+        if printed_rows := handler():
+            print_rows(printed_rows)
 
 
 if __name__ == "__main__":
